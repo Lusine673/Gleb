@@ -1,44 +1,16 @@
 import math
 import streamlit as st
 
-st.set_page_config(page_title="Прогноз серомы после лапароскопической герниопластики",
+st.set_page_config(page_title="Прогноз осложнений после лапароскопической герниопластики",
                    page_icon="🩺", layout="centered")
 
-# -------------------------------------------------
-# Коэффициенты модели (Таблица 9)
-# Формула: p = 1 / (1 + exp(-(b0 + Σ b_i·x_i)))
-# -------------------------------------------------
-B0 = 1.669                        # Константа
-B_SURG_TYPE = -0.975             # Тип вмешательства: 1 = TAPP, 0 = eTEP
-B_PRIOR_HERNIA = 2.018            # Грыжесечение в анамнезе: 1 = да, 0 = нет
-B_ASA = -1.418                    # ASA (1–4), как числовая переменная
-B_BMI = -0.007                    # ИМТ (число)
-
-# Примечание: в таблице Exp(B) для «Тип вмешательства» = 0.377.
-# Если ориентироваться на Exp(B), то b ≈ ln(0.377) = -0.976 (а не -0.0975).
-# Я оставил ровно -0.0975 как в вашем скрине. При необходимости замените на -0.976.
-
-
+# ------------ утилиты ------------
 def sigmoid(z: float) -> float:
-    # Численно устойчивая логистическая функция
     if z >= 0:
         ez = math.exp(-z)
         return 1.0 / (1.0 + ez)
     ez = math.exp(z)
     return ez / (1.0 + ez)
-
-
-def predict_probability(surg_type_tapp: int, prior_hernia: int, asa: float, bmi: float) -> float:
-    # z = b0 + b1*x1 + ...; где x1.. — значения признаков
-    z = (
-        B0
-        + B_SURG_TYPE * int(surg_type_tapp)
-        + B_PRIOR_HERNIA * int(prior_hernia)
-        + B_ASA * float(asa)
-        + B_BMI * float(bmi)
-    )
-    return sigmoid(z)
-
 
 def risk_class(prob: float) -> str:
     if prob < 0.10:
@@ -47,48 +19,125 @@ def risk_class(prob: float) -> str:
         return "Умеренный риск"
     return "Высокий риск"
 
+st.title("Прогноз осложнений после лапароскопической герниопластики")
+tabs = st.tabs(["Серома", "Боль"])
 
-# ---------------- UI ----------------
-st.title("Прогноз риска серомы после лапароскопической герниопластики")
+# ================== Серома ==================
+with tabs[0]:
+    st.subheader("Риск серомы")
 
-col1, col2 = st.columns(2)
-with col1:
-    surgery = st.selectbox(
-        "Тип вмешательства (кодировка: 1 = TAPP, 0 = eTEP)",
-        options=["eTEP (0)", "TAPP (1)"],
-        index=0
+    # Таблица 9 — коэффициенты
+    # Тип вмешательства: 0 = TAPP, 1 = eTEP
+    B0_S = 1.669
+    B_SURG_TYPE_S = -0.975       # 1=eTEP, 0=TAPP
+    B_PRIOR_HERNIA_S = 2.018     # 1=да, 0=нет
+    B_ASA_S = -1.418             # ASA как 1..4
+    B_BMI_S = -0.007             # ИМТ (число)
+
+    def predict_seroma(intervention_etep: int, prior_hernia: int, asa: int, bmi: float) -> float:
+        z = (
+            B0_S
+            + B_SURG_TYPE_S * int(intervention_etep)
+            + B_PRIOR_HERNIA_S * int(prior_hernia)
+            + B_ASA_S * int(asa)
+            + B_BMI_S * float(bmi)
+        )
+        return sigmoid(z)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        surg_label_s = st.selectbox("Тип вмешательства", options=["TAPP", "eTEP"], key="s_surg")
+        intervention_etep_s = 1 if surg_label_s == "eTEP" else 0
+        prior_hernia_s = st.checkbox("Грыжесечение в анамнезе", value=False, key="s_ph")
+
+    with col2:
+        asa_label_s = st.selectbox("ASA (класс)", options=["I", "II", "III", "IV"], index=1, key="s_asa")
+        asa_s = ["I", "II", "III", "IV"].index(asa_label_s) + 1
+        bmi_s = st.number_input("ИМТ, кг/м²", min_value=10.0, max_value=70.0, step=0.1, value=26.0, key="s_bmi")
+
+    p_seroma = predict_seroma(
+        intervention_etep=intervention_etep_s,
+        prior_hernia=1 if prior_hernia_s else 0,
+        asa=asa_s,
+        bmi=bmi_s
     )
-    surg_type_tapp = 1 if "TAPP" in surgery else 0
 
-    prior_hernia = st.checkbox("Грыжесечение в анамнезе (1 = да)", value=False)
+    st.write("---")
+    c1, c2 = st.columns(2)
+    c1.metric("Вероятность серомы", f"{p_seroma*100:.1f}%")
+    c2.metric("Класс риска", risk_class(p_seroma))
 
-with col2:
-    asa = st.number_input("ASA (1–4)", min_value=1.0, max_value=4.0, step=1.0, value=2.0, format="%.0f")
-    bmi = st.number_input("ИМТ, кг/м²", min_value=10.0, max_value=70.0, step=0.1, value=26.0)
+    if p_seroma < 0.10:
+        st.success("Низкий риск")
+    elif p_seroma <= 0.50:
+        st.warning("Умеренный риск")
+    else:
+        st.error("Высокий риск")
 
-# Автопересчёт без кнопки
-p = predict_probability(
-    surg_type_tapp=surg_type_tapp,
-    prior_hernia=1 if prior_hernia else 0,
-    asa=asa,
-    bmi=bmi
-)
+# ================== Боль ==================
+with tabs[1]:
+    st.subheader("Риск болевого синдрома")
 
-st.write("---")
-c1, c2 = st.columns(2)
-c1.metric("Вероятность серомы", f"{p*100:.1f}%")
-cls = risk_class(p)
-c2.metric("Класс риска", cls)
+    # Таблица 14 — только значимые и с тенденцией
+    # Тип вмешательства: 0 = TAPP, 1 = eTEP
+    B0_P = -62.457
+    B_BMI_P = 1.541
+    B_ASA_P = 3.495
+    B_INTERVENTION_P = 6.063          # 1=eTEP, 0=TAPP
+    B_PRIOR_OPERATION_P = -3.389      # 1=да, 0=нет
+    B_PRIOR_HERNIA_P = 2.069          # 1=да, 0=нет (тенденция)
+    B_DURATION_PER_HOUR_P = 2.605     # коэффициент дан в модели (по источнику); вводим минуты
 
-# Цветовая подсветка статуса
-if p < 0.10:
-    st.success("Низкий риск")
-elif p <= 0.50:
-    st.warning("Умеренный риск")
-else:
-    st.error("Высокий риск")
+    def predict_pain(bmi: float, asa: int, intervention_etep: int,
+                     prior_operation: int, prior_hernia: int, duration_min: float) -> float:
+        # Продолжительность вводится в минутах; переводим во "внутренние часы"
+        duration_hours = float(duration_min) / 60.0
+        z = (
+            B0_P
+            + B_BMI_P * float(bmi)
+            + B_ASA_P * int(asa)
+            + B_INTERVENTION_P * int(intervention_etep)
+            + B_PRIOR_OPERATION_P * int(prior_operation)
+            + B_PRIOR_HERNIA_P * int(prior_hernia)
+            + B_DURATION_PER_HOUR_P * duration_hours
+        )
+        return sigmoid(z)
 
+    c1, c2 = st.columns(2)
+    with c1:
+        surg_label_p = st.selectbox("Тип вмешательства", options=["TAPP", "eTEP"], key="p_surg")
+        intervention_etep_p = 1 if surg_label_p == "eTEP" else 0
 
+        prior_operation = st.checkbox("Оперативные вмешательства в анамнезе", key="p_prevop")
+        prior_hernia_p = st.checkbox("Грыжесечение в анамнезе", key="p_prevhernia")
 
+    with c2:
+        asa_label_p = st.selectbox("ASA (класс)", options=["I", "II", "III", "IV"], index=1, key="p_asa")
+        asa_p = ["I", "II", "III", "IV"].index(asa_label_p) + 1
+        bmi_p = st.number_input("ИМТ, кг/м²", min_value=10.0, max_value=70.0, step=0.1, value=26.0, key="p_bmi")
+        duration_min = st.number_input("Длительность операции, мин", min_value=10.0, max_value=600.0,
+                                       step=5.0, value=90.0, key="p_dur")
 
+    p_pain = predict_pain(
+        bmi=bmi_p,
+        asa=asa_p,
+        intervention_etep=intervention_etep_p,
+        prior_operation=1 if prior_operation else 0,
+        prior_hernia=1 if prior_hernia_p else 0,
+        duration_min=duration_min
+    )
 
+    st.write("---")
+    cc1, cc2 = st.columns(2)
+    cc1.metric("Вероятность боли", f"{p_pain*100:.1f}%")
+    cc2.metric("Класс риска", risk_class(p_pain))
+
+    if p_pain < 0.10:
+        st.success("Низкий риск")
+    elif p_pain <= 0.50:
+        st.warning("Умеренный риск")
+    else:
+        st.error("Высокий риск")
+
+st.caption("Шкала риска: <10% — низкий, 10–50% — умеренный, >50% — высокий. "
+           "Инструмент предназначен для исследовательских целей.")
