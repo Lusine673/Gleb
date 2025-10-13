@@ -78,20 +78,19 @@ with tabs[0]:
 with tabs[1]:
     st.subheader("Риск болевого синдрома")
 
-    # Таблица 14 — только значимые и с тенденцией
+    # Таблица 14 — значимые и с тенденцией
     # Тип вмешательства: 0 = TAPP, 1 = eTEP
     B0_P = -62.457
     B_BMI_P = 1.541
-    B_ASA_P = 3.495
+    B_ASA_P = 4.034
     B_INTERVENTION_P = 6.063          # 1=eTEP, 0=TAPP
     B_PRIOR_OPERATION_P = -3.389      # 1=да, 0=нет
-    B_PRIOR_HERNIA_P = 2.069          # 1=да, 0=нет (тенденция)
-    B_DURATION_PER_HOUR_P = 2.605     # коэффициент дан в модели (по источнику); вводим минуты
+    B_PRIOR_HERNIA_P = 2.669          # 1=да, 0=нет
+    B_HTN_P = 3.196                    # Гипертоническая болезнь (0/1)
+    B_DURATION_PER_MIN_P = 0.005      # длительность: коэффициент за 1 минуту
 
     def predict_pain(bmi: float, asa: int, intervention_etep: int,
-                     prior_operation: int, prior_hernia: int, duration_min: float) -> float:
-        # Продолжительность вводится в минутах; переводим во "внутренние часы"
-        duration_hours = float(duration_min) / 60.0
+                     prior_operation: int, prior_hernia: int, htn: int, duration_min: float) -> float:
         z = (
             B0_P
             + B_BMI_P * float(bmi)
@@ -99,7 +98,8 @@ with tabs[1]:
             + B_INTERVENTION_P * int(intervention_etep)
             + B_PRIOR_OPERATION_P * int(prior_operation)
             + B_PRIOR_HERNIA_P * int(prior_hernia)
-            + B_DURATION_PER_HOUR_P * duration_hours
+            + B_HTN_P * int(htn)
+            + B_DURATION_PER_MIN_P * float(duration_min)
         )
         return sigmoid(z)
 
@@ -110,6 +110,7 @@ with tabs[1]:
 
         prior_operation = st.checkbox("Оперативные вмешательства в анамнезе", key="p_prevop")
         prior_hernia_p = st.checkbox("Грыжесечение в анамнезе", key="p_prevhernia")
+        htn_p = st.checkbox("Гипертоническая болезнь", key="p_htn")
 
     with c2:
         asa_label_p = st.selectbox("ASA (класс)", options=["I", "II", "III", "IV"], index=1, key="p_asa")
@@ -124,6 +125,7 @@ with tabs[1]:
         intervention_etep=intervention_etep_p,
         prior_operation=1 if prior_operation else 0,
         prior_hernia=1 if prior_hernia_p else 0,
+        htn=1 if htn_p else 0,
         duration_min=duration_min
     )
 
