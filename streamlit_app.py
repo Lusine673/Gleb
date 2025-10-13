@@ -1,87 +1,84 @@
 import streamlit as st
-import numpy as np
+import pandas as pd
 
-st.set_page_config(page_title="Прогноз осложнений", layout="centered")
+from utils import logit_and_proba, contributions
+from models import seroma as m_seroma
+from models import pain as m_pain
 
-# 🏷️ Название
-st.title("📊 ПРОГНОЗИРОВАНИЕ СЕРОМЫ И БОЛЕВОГО СИНДРОМА ПОСЛЕ ГЕРНИОПЛАСТИКИ ЛАПАРОСКОПИЧЕСКИМИ МЕТОДАМИ")
+st.set_page_config(page_title="Риск осложнений после лапароскопической герниопластики",
+                   page_icon="🩺",
+                   layout="centered")
 
-# 🔽 ВВОД ДАННЫХ ОДИН ДЛЯ ОБЕИХ МОДЕЛЕЙ
-st.header("📝 Ввод данных пациента")
+def render_form(fields):
+    values = {}
+    for f in fields:
+        key = f["key"]
+        label = f["label"]
+        typ = f["type"]
 
-st.info("Укажите клинические данные для оценки вероятности осложнений после герниопластики.")
+        if typ == "number":
+            values[key] = st.number_input(
+                label,
+                value=float(f.get("default", 0)),
+                min_value=float(f.get("min", -1e9)),
+                max_value=float(f.get("max", 1e9)),
+                step=float(f.get("step", 1)),
+                key=key
+            )
+        elif typ == "checkbox":
+            values[key] = 1 if st.checkbox(label, value=f.get("default", False), key=key) else 0
+        elif typ == "select":
+            opts = f.get("options", {})
+            # Отображаем подписи, возвращаем код
+            label_to_code = opts
+            label_selected = st.selectbox(label, list(label_to_code.keys()), key=key)
+            values[key] = label_to_code[label_selected]
+        else:
+            st.warning(f"Неизвестный тип поля: {typ}")
+    return values
 
-# Ввод
-BMI = st.number_input("Индекс массы тела (ИМТ)", min_value=10.0, max_value=50.0, value=25.0, step=0.1)
+def render_model_block(name, fields, coef, default_threshold=0.30):
+    st.subheader(name)
 
-surgery_type = st.selectbox("Тип вмешательства", ["eTEP", "TAPP"])
-hernia_history = st.checkbox("Грыжесечение в анамнезе")
-asa_class = st.selectbox("ASA класс", ["I–II", "III (высокий риск)"])
+    with st.expander("Примечания к вводу", expanded=False):
+        st.write(
+            "- Для чекбоксов 1 = «есть признак», 0 = «нет».\n"
+            "- Для выпадающих списков указан код, который идет в модель (базовая категория = 0).\n"
+            "- Проверьте кодировку категорий согласно исходной работе."
+        )
 
-# Кодировка переменных
-x_surgery = 1 if surgery_type == "TAPP" else 0
-x_hernia = 1 if hernia_history else 0
-x_asa = 1 if asa_class == "III (высокий риск)" else 0
-x_bmi = BMI
+    values = render_form(fields)
 
-# ======================================================================================
-# 📌 МОДЕЛЬ 1 — СЕРОМА
-st.header("💧 Риск серомы в послеоперационном периоде")
+    # Расчет
+    lg, p = logit_and_proba(coef, values)
+    contr = contributions(coef, values)
+    thr = default_threshold
 
-B0_seroma = 1.669
-B_surgery_seroma = -0.975
-B_hernia_seroma = 2.018
-B_asa_seroma = -1.418
-B_bmi_seroma = -0.007
+    st.markdown("—")
+    cols = st.columns(3)
+    cols[0].metric("Логит", f"{lg:.3f}")
+    cols[1].metric("Вероятность", f"{p*100:.1f}%")
+    risk_label = "Высокий риск" if p >= thr else "Низкий/умеренный риск"
+    cols[2].metric("Класс риска", risk_label)
 
-logit_seroma = (
-    B0_seroma +
-    B_surgery_seroma * x_surgery +
-    B_hernia_seroma * x_hernia +
-    B_asa_seroma * x_asa +
-    B_bmi_seroma * x_bmi
-)
+    with st.expander("Вклад признаков (β·x)", expanded=False):
+        df = pd.DataFrame(
+            [{"Признак": k, "β": coef.get(k, 0.0), "x": values[k], "β·x": v} for k, v in contr.items()]
+        ).sort_values("β·x", ascending=False)
+        st.dataframe(df, hide_index=True, use_container_width=True)
 
-prob_seroma = 1 / (1 + np.exp(-logit_seroma))
-pct_seroma = min(max(prob_seroma * 100, 0), 100)
+    st.caption(f"Порог визуализации риска: {int(thr*100)}% (можно изменить в коде модели).")
 
-st.success(f"🔹 Вероятность серомы: **{pct_seroma:.2f}%**")
-st.progress(min(prob_seroma, 1.0))
+st.title("Прогноз осложнений после лапароскопической герниопластики")
+st.write("Приложение рассчитывает риск серомы и риск боли в раннем послеоперационном периоде по данным логистических регрессий из вашего исследования. Пожалуйста, перепроверьте кодировку категориальных переменных и коэффициенты.")
 
-if prob_seroma < 0.1:
-    st.markdown("🟢 Низкий риск серомы")
-elif prob_seroma < 0.5:
-    st.markdown("🟡 Умеренный риск серомы")
-else:
-    st.markdown("🔴 Высокий риск серомы")
+tab1, tab2 = st.tabs(["Серома", "Боль"])
 
-# ======================================================================================
-# 📌 МОДЕЛЬ 2 — БОЛЕВОЙ СИНДРОМ
-st.header("💥 Риск болевого синдрома в послеоперационном периоде")
+with tab1:
+    render_model_block(m_seroma.MODEL_NAME, m_seroma.FIELDS, m_seroma.COEF, m_seroma.DEFAULT_THRESHOLD)
 
-B0_pain = 1.669
-B_surgery_pain = -0.0975
-B_hernia_pain = 2.018
-B_asa_pain = -1.418
-B_bmi_pain = -0.007
+with tab2:
+    render_model_block(m_pain.MODEL_NAME, m_pain.FIELDS, m_pain.COEF, m_pain.DEFAULT_THRESHOLD)
 
-logit_pain = (
-    B0_pain +
-    B_surgery_pain * x_surgery +
-    B_hernia_pain * x_hernia +
-    B_asa_pain * x_asa +
-    B_bmi_pain * x_bmi
-)
-
-prob_pain = 1 / (1 + np.exp(-logit_pain))
-pct_pain = min(max(prob_pain * 100, 0), 100)
-
-st.success(f"🔹 Вероятность болевого синдрома: **{pct_pain:.2f}%**")
-st.progress(min(prob_pain, 1.0))
-
-if prob_pain < 0.1:
-    st.markdown("🟢 Низкий болевой риск")
-elif prob_pain < 0.5:
-    st.markdown("🟡 Умеренный болевой риск")
-else:
-    st.markdown("🔴 Высокий болевой риск")
+st.divider()
+st.caption("Не является медицинским изделием. Результаты предназначены только для исследовательских целей и не заменяют клиническое решение.")
