@@ -26,17 +26,18 @@ tabs = st.tabs(["Серома", "Боль"])
 with tabs[0]:
     st.subheader("Риск серомы")
 
-    # Таблица 9 — коэффициенты (без ИМТ)
-    # Тип вмешательства: 0 = TAPP, 1 = eTEP
+    # Коэффициенты (табл. 9), без ИМТ. ВНИМАНИЕ: коэффициенты НЕ меняем.
+    # Тип вмешательства в модели задан как коэффициент при индикаторе eTEP.
+    # В UI ниже TAPP=1, eTEP=0 — внутри переводим в eTEP=1−TAPP.
     B0_S = 1.669
-    B_SURG_TYPE_S = -0.975       # 1=eTEP, 0=TAPP
+    B_SURG_TYPE_S = -0.975       # коэффициент к индикатору eTEP
     B_PRIOR_HERNIA_S = 2.018     # 1=да, 0=нет
     B_ASA_S = -1.418             # ASA как 1..4
 
-    def predict_seroma(intervention_etep: int, prior_hernia: int, asa: int) -> float:
+    def predict_seroma(e_tep: int, prior_hernia: int, asa: int) -> float:
         z = (
             B0_S
-            + B_SURG_TYPE_S * int(intervention_etep)
+            + B_SURG_TYPE_S * int(e_tep)         # ВНИЗУ e_tep=1 для eTEP, 0 для TAPP
             + B_PRIOR_HERNIA_S * int(prior_hernia)
             + B_ASA_S * int(asa)
         )
@@ -45,7 +46,8 @@ with tabs[0]:
     col1, col2 = st.columns(2)
     with col1:
         surg_label_s = st.selectbox("Тип вмешательства", options=["TAPP", "eTEP"], key="s_surg")
-        intervention_etep_s = 1 if surg_label_s == "eTEP" else 0
+        tapp_indicator = 1 if surg_label_s == "TAPP" else 0
+        etep_indicator = 1 - tapp_indicator     # так сохраняем корректность коэффициента
         prior_hernia_s = st.checkbox("Грыжесечение в анамнезе", value=False, key="s_ph")
 
     with col2:
@@ -53,7 +55,7 @@ with tabs[0]:
         asa_s = ["I", "II", "III", "IV"].index(asa_label_s) + 1
 
     p_seroma = predict_seroma(
-        intervention_etep=intervention_etep_s,
+        e_tep=etep_indicator,
         prior_hernia=1 if prior_hernia_s else 0,
         asa=asa_s
     )
@@ -70,20 +72,28 @@ with tabs[0]:
     else:
         st.error("Высокий риск")
 
+    st.info(
+        "Дисклеймер: инструмент предназначен исключительно для исследовательских и "
+        "образовательных целей. Не является медицинским изделием. "
+        "Внешняя клиническая валидация (включая оценку дискриминационной способности и "
+        "калибровки на исходной выборке) не проводилась; результаты не заменяют "
+        "клиническое решение."
+    )
+
 # ================== Боль ==================
 with tabs[1]:
     st.subheader("Риск болевого синдрома")
 
-    # Таблица 14 — значимые и с тенденцией
-    # Тип вмешательства: 0 = TAPP, 1 = eTEP
+    # Таблица 14 — значимые и с тенденцией. Кодировку здесь НЕ меняем (как было ранее):
+    # Тип вмешательства: 0 = TAPP, 1 = eTEP.
     B0_P = -62.457
     B_BMI_P = 1.541
     B_ASA_P = 4.034
     B_INTERVENTION_P = 6.063          # 1=eTEP, 0=TAPP
     B_PRIOR_OPERATION_P = -3.389      # 1=да, 0=нет
     B_PRIOR_HERNIA_P = 2.669          # 1=да, 0=нет
-    B_HTN_P = 3.196                    # Гипертоническая болезнь (0/1)
-    B_DURATION_PER_MIN_P = 0.005      # длительность: коэффициент за 1 минуту
+    B_HTN_P = 3.196                    # 1=да, 0=нет
+    B_DURATION_PER_MIN_P = 0.005      # минуты
 
     def predict_pain(bmi: float, asa: int, intervention_etep: int,
                      prior_operation: int, prior_hernia: int, htn: int, duration_min: float) -> float:
@@ -136,3 +146,10 @@ with tabs[1]:
         st.warning("Умеренный риск")
     else:
         st.error("Высокий риск")
+
+    st.info(
+        "Дисклеймер: инструмент предназначен исключительно для исследовательских и "
+        "образовательных целей. Не является медицинским изделием. "
+        "Внешняя клиническая валидация (оценка дискриминационной способности и калибровки) "
+        "на исходной выборке не проводилась; результаты не являются руководством к лечению."
+    )
