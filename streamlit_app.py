@@ -26,18 +26,17 @@ tabs = st.tabs(["Серома", "Боль"])
 with tabs[0]:
     st.subheader("Риск серомы")
 
-    # Коэффициенты (табл. 9), без ИМТ. ВНИМАНИЕ: коэффициенты НЕ меняем.
-    # Тип вмешательства в модели задан как коэффициент при индикаторе eTEP.
-    # В UI ниже TAPP=1, eTEP=0 — внутри переводим в eTEP=1−TAPP.
+    # Коэффициенты (табл. 9), без ИМТ.
+    # ВАЖНО: коэффициент при eTEP; в UI TAPP=1, eTEP=0 → внутри eTEP = 1 − TAPP.
     B0_S = 1.669
-    B_SURG_TYPE_S = -0.975       # коэффициент к индикатору eTEP
+    B_SURG_TYPE_S = -0.975       # умножается на I(eTEP)
     B_PRIOR_HERNIA_S = 2.018     # 1=да, 0=нет
-    B_ASA_S = -1.418             # ASA как 1..4
+    B_ASA_S = -1.418             # 1..4
 
     def predict_seroma(e_tep: int, prior_hernia: int, asa: int) -> float:
         z = (
             B0_S
-            + B_SURG_TYPE_S * int(e_tep)         # ВНИЗУ e_tep=1 для eTEP, 0 для TAPP
+            + B_SURG_TYPE_S * int(e_tep)         # eTEP: 1, TAPP: 0
             + B_PRIOR_HERNIA_S * int(prior_hernia)
             + B_ASA_S * int(asa)
         )
@@ -47,7 +46,7 @@ with tabs[0]:
     with col1:
         surg_label_s = st.selectbox("Тип вмешательства", options=["TAPP", "eTEP"], key="s_surg")
         tapp_indicator = 1 if surg_label_s == "TAPP" else 0
-        etep_indicator = 1 - tapp_indicator     # так сохраняем корректность коэффициента
+        etep_indicator = 1 - tapp_indicator  # перевод в индикатор eTEP для формулы
         prior_hernia_s = st.checkbox("Грыжесечение в анамнезе", value=False, key="s_ph")
 
     with col2:
@@ -73,46 +72,43 @@ with tabs[0]:
         st.error("Высокий риск")
 
     st.info(
-        "Дисклеймер: инструмент предназначен исключительно для исследовательских и "
-        "образовательных целей. Не является медицинским изделием. "
-        "Внешняя клиническая валидация (включая оценку дискриминационной способности и "
-        "калибровки на исходной выборке) не проводилась; результаты не заменяют "
-        "клиническое решение."
+        "Дисклеймер: инструмент предназначен исключительно для исследовательских и образовательных целей. "
+        "Не является медицинским изделием. Внешняя клиническая валидация и полная оценка "
+        "дискриминационной способности/калибровки на исходной выборке не проводились."
     )
 
 # ================== Боль ==================
 with tabs[1]:
     st.subheader("Риск болевого синдрома")
 
-    # Таблица 14 — значимые и с тенденцией. Кодировку здесь НЕ меняем (как было ранее):
-    # Тип вмешательства: 0 = TAPP, 1 = eTEP.
+    # Коэффициенты (табл. 14). Длительность операции исключена.
+    # ВАЖНО: коэффициент при eTEP; в UI TAPP=1, eTEP=0 → внутри eTEP = 1 − TAPP.
     B0_P = -62.457
     B_BMI_P = 1.541
     B_ASA_P = 4.034
-    B_INTERVENTION_P = 6.063          # 1=eTEP, 0=TAPP
-    B_PRIOR_OPERATION_P = -3.389      # 1=да, 0=нет
-    B_PRIOR_HERNIA_P = 2.669          # 1=да, 0=нет
-    B_HTN_P = 3.196                    # 1=да, 0=нет
-    B_DURATION_PER_MIN_P = 0.005      # минуты
+    B_INTERVENTION_E_TEP_P = 6.063   # умножается на I(eTEP)
+    B_PRIOR_OPERATION_P = -3.389
+    B_PRIOR_HERNIA_P = 2.669
+    B_HTN_P = 3.196
 
-    def predict_pain(bmi: float, asa: int, intervention_etep: int,
-                     prior_operation: int, prior_hernia: int, htn: int, duration_min: float) -> float:
+    def predict_pain(bmi: float, asa: int, tapp_indicator: int,
+                     prior_operation: int, prior_hernia: int, htn: int) -> float:
+        e_tep = 1 - int(tapp_indicator)  # преобразуем TAPP=1/eTEP=0 → eTEP индикатор
         z = (
             B0_P
             + B_BMI_P * float(bmi)
             + B_ASA_P * int(asa)
-            + B_INTERVENTION_P * int(intervention_etep)
+            + B_INTERVENTION_E_TEP_P * e_tep
             + B_PRIOR_OPERATION_P * int(prior_operation)
             + B_PRIOR_HERNIA_P * int(prior_hernia)
             + B_HTN_P * int(htn)
-            + B_DURATION_PER_MIN_P * float(duration_min)
         )
         return sigmoid(z)
 
     c1, c2 = st.columns(2)
     with c1:
         surg_label_p = st.selectbox("Тип вмешательства", options=["TAPP", "eTEP"], key="p_surg")
-        intervention_etep_p = 1 if surg_label_p == "eTEP" else 0
+        tapp_indicator_p = 1 if surg_label_p == "TAPP" else 0
 
         prior_operation = st.checkbox("Оперативные вмешательства в анамнезе", key="p_prevop")
         prior_hernia_p = st.checkbox("Грыжесечение в анамнезе", key="p_prevhernia")
@@ -122,17 +118,15 @@ with tabs[1]:
         asa_label_p = st.selectbox("ASA (класс)", options=["I", "II", "III", "IV"], index=1, key="p_asa")
         asa_p = ["I", "II", "III", "IV"].index(asa_label_p) + 1
         bmi_p = st.number_input("ИМТ, кг/м²", min_value=10.0, max_value=70.0, step=0.1, value=26.0, key="p_bmi")
-        duration_min = st.number_input("Длительность операции, мин", min_value=10.0, max_value=600.0,
-                                       step=5.0, value=90.0, key="p_dur")
+        # Длительность операции удалена по вашему решению
 
     p_pain = predict_pain(
         bmi=bmi_p,
         asa=asa_p,
-        intervention_etep=intervention_etep_p,
+        tapp_indicator=tapp_indicator_p,
         prior_operation=1 if prior_operation else 0,
         prior_hernia=1 if prior_hernia_p else 0,
-        htn=1 if htn_p else 0,
-        duration_min=duration_min
+        htn=1 if htn_p else 0
     )
 
     st.write("---")
@@ -148,8 +142,7 @@ with tabs[1]:
         st.error("Высокий риск")
 
     st.info(
-        "Дисклеймер: инструмент предназначен исключительно для исследовательских и "
-        "образовательных целей. Не является медицинским изделием. "
-        "Внешняя клиническая валидация (оценка дискриминационной способности и калибровки) "
-        "на исходной выборке не проводилась; результаты не являются руководством к лечению."
+        "Дисклеймер: инструмент предназначен исключительно для исследовательских и образовательных целей. "
+        "Не является медицинским изделием. Внешняя клиническая валидация и полная оценка "
+        "дискриминационной способности/калибровки на исходной выборке не проводились."
     )
