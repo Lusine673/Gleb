@@ -26,21 +26,19 @@ tabs = st.tabs(["Серома", "Боль"])
 with tabs[0]:
     st.subheader("Риск серомы")
 
-    # Таблица 9 — коэффициенты
+    # Таблица 9 — коэффициенты (без ИМТ)
     # Тип вмешательства: 0 = TAPP, 1 = eTEP
     B0_S = 1.669
     B_SURG_TYPE_S = -0.975       # 1=eTEP, 0=TAPP
     B_PRIOR_HERNIA_S = 2.018     # 1=да, 0=нет
     B_ASA_S = -1.418             # ASA как 1..4
-    B_BMI_S = -0.007             # ИМТ (число)
 
-    def predict_seroma(intervention_etep: int, prior_hernia: int, asa: int, bmi: float) -> float:
+    def predict_seroma(intervention_etep: int, prior_hernia: int, asa: int) -> float:
         z = (
             B0_S
             + B_SURG_TYPE_S * int(intervention_etep)
             + B_PRIOR_HERNIA_S * int(prior_hernia)
             + B_ASA_S * int(asa)
-            + B_BMI_S * float(bmi)
         )
         return sigmoid(z)
 
@@ -53,13 +51,11 @@ with tabs[0]:
     with col2:
         asa_label_s = st.selectbox("ASA (класс)", options=["I", "II", "III", "IV"], index=1, key="s_asa")
         asa_s = ["I", "II", "III", "IV"].index(asa_label_s) + 1
-        bmi_s = st.number_input("ИМТ, кг/м²", min_value=10.0, max_value=70.0, step=0.1, value=26.0, key="s_bmi")
 
     p_seroma = predict_seroma(
         intervention_etep=intervention_etep_s,
         prior_hernia=1 if prior_hernia_s else 0,
-        asa=asa_s,
-        bmi=bmi_s
+        asa=asa_s
     )
 
     st.write("---")
@@ -140,6 +136,3 @@ with tabs[1]:
         st.warning("Умеренный риск")
     else:
         st.error("Высокий риск")
-
-
-
